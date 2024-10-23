@@ -3,11 +3,10 @@ from threading import Thread
 from rclpy.node import Node
 import time
 from sensor_msgs.msg import Image
-from copy import deepcopy
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
-from geometry_msgs.msg import Twist, Vector3
+from geometry_msgs.msg import Twist
 
 class BallTracker(Node):
     """ The BallTracker is a Python object that encompasses a ROS node 
@@ -22,7 +21,12 @@ class BallTracker(Node):
         self.bridge = CvBridge()                    # used to convert ROS messages to OpenCV
 
         self.create_subscription(Image, image_topic, self.process_image, 10)
+        
         self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.center_x = 0.
+        self.center_y = 0.
+        self.should_move = False
+
         self.red_lower_bound = 0
         self.green_lower_bound = 0
         self.blue_lower_bound = 0
@@ -44,7 +48,6 @@ class BallTracker(Node):
         cv2.namedWindow('video_window')
         cv2.namedWindow('binary_window')
         cv2.namedWindow('image_info')
-        self.red_lower_bound = 0
         cv2.createTrackbar('red lower bound', 'binary_window', self.red_lower_bound, 255, self.set_red_lower_bound)
         cv2.createTrackbar('red upper bound', 'binary_window', self.red_upper_bound, 255, self.set_red_upper_bound)
         cv2.createTrackbar('green lower bound', 'binary_window', self.green_lower_bound, 255, self.set_green_lower_bound)
@@ -83,6 +86,7 @@ class BallTracker(Node):
     def process_mouse_event(self, event, x,y,flags,param):
         """ Process mouse events so that you can see the color values
             associated with a particular pixel in the camera images """
+        # scroll event for rendering pixel data
         self.image_info_window = 255*np.ones((500,500,3))
         cv2.putText(self.image_info_window,
                     'Color (b=%d,g=%d,r=%d)' % (self.cv_image[y,x,0], self.cv_image[y,x,1], self.cv_image[y,x,2]),
@@ -90,12 +94,27 @@ class BallTracker(Node):
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     (0,0,0))
+        
+        # click event for controlling vehicle motion
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.should_move = not(self.should_move)
 
     def run_loop(self):
         # NOTE: only do cv2.imshow and cv2.waitKey in this function 
         if not self.cv_image is None:
             self.binary_image = cv2.inRange(self.cv_image, (self.blue_lower_bound,self.green_lower_bound,self.red_lower_bound), (self.blue_upper_bound,self.green_upper_bound,self.red_upper_bound))
             print(self.cv_image.shape)
+            moments = cv2.moments(self.binary_image)
+            if moments['m00'] != 0:
+                self.center_x, self.center_y = moments['m10']/moments['m00'], moments['m01']/moments['m00']
+                # normalize self.center_x
+                norm_x_pose = (self.center_x - self.cv_image.shape[1]/2) / self.cv_image.shape[1]
+                # create message pose (stopped, else move towards target)
+                msg_cmd = Twist()
+                if self.should_move is True:
+                    msg_cmd.linear.x = 0.1
+                    msg_cmd.angular.z = -norm_x_pose
+                self.pub.publish(msg_cmd)
             cv2.imshow('video_window', self.cv_image)
             cv2.imshow('binary_window', self.binary_image)
             if hasattr(self, 'image_info_window'):

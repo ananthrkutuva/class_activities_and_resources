@@ -3,11 +3,10 @@ from threading import Thread
 from rclpy.node import Node
 import time
 from sensor_msgs.msg import Image
-from copy import deepcopy
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
-from geometry_msgs.msg import Twist, Vector3
+from geometry_msgs.msg import Twist
 
 class BallTracker(Node):
     """ The BallTracker is a Python object that encompasses a ROS node 
